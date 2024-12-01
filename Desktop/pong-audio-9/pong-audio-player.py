@@ -13,11 +13,25 @@
     
     You can use keyboards to send command, such as "g 1" to start the game, see the end of this file
 
+
+        source pong/bin/activate
+
+    start host game: 
+        python pong-audio-host-do-not-edit.py
+    open second player: 
+        python pong-audio-player.py p1
+    open third player: 
+        python pong-audio-player.py p2
+
+
+
 """
 #native imports
 import time
 from playsound import playsound
 import argparse
+import pyttsx3
+
 
 from pythonosc import osc_server
 from pythonosc import dispatcher
@@ -76,6 +90,10 @@ if __name__ == '__main__' :
 
 # functions receiving messages from host
 # TODO: add audio output so you know what's going on in the game
+
+def output(message): 
+    engine.say(message)
+    engine.runAndWait()
 
 def on_receive_game(address, *args):
     print("> game state: " + str(args[0]))
@@ -148,9 +166,12 @@ dispatcher_player.map("/p2bigpaddle", on_receive_p2_bigpaddle)
 
 # example 1: speech recognition functions using google api
 # -------------------------------------#
+engine = pyttsx3.init()
+
 def listen_to_speech():
     global quit
     while not quit:
+        
         # obtain audio from the microphone
         r = sr.Recognizer()
         with sr.Microphone() as source:
@@ -159,13 +180,16 @@ def listen_to_speech():
         # recognize speech using Google Speech Recognition
         try:
             # for testing purposes, we're just using the default API key
-            # to use another API key, use `r.recognize_google(audio, key="GOOGLE_SPEECH_RECOGNITION_API_KEY")`
-            # instead of `r.recognize_google(audio)`
+            # to use another API key, use r.recognize_google(audio, key="GOOGLE_SPEECH_RECOGNITION_API_KEY")
+            # instead of r.recognize_google(audio)
             recog_results = r.recognize_google(audio)
             print("[speech recognition] Google Speech Recognition thinks you said \"" + recog_results + "\"")
             # if recognizing quit and exit then exit the program
             if recog_results == "play" or recog_results == "start":
                 client.send_message('/g', 1)
+                client.send_message('/setgame', 1)
+                output("Game starting")
+            
         except sr.UnknownValueError:
             print("[speech recognition] Google Speech Recognition could not understand audio")
         except sr.RequestError as e:
@@ -270,14 +294,15 @@ while True:
     if len(cmd) == 1:
         client.send_message("/"+cmd[0], 0)
     
+
     # this is how client send messages to server
     # send paddle position 200 (it should be between 0 - 450):
-    # client.send_message('/p', 200)
+#   client.send_message('/p', 200)
     # set level to 3:
-    # client.send_message('/l', 3)
+  #  client.send_message('/l', 3)
     # start the game:
-    # client.send_message('/g', 1)
+  #  client.send_message('/g', 1)
     # pause the game:
-    # client.send_message('/g', 0)
+   # client.send_message('/g', 0)
     # big paddle if received power up:
-    # client.send_message('/b', 0)
+    #client.send_message('/b', 0) what does str(args[0) mean
