@@ -23,6 +23,9 @@
     open third player: 
         python pong-audio-player.py p2
 
+    
+        #aubio sources: https://github.com/aubio/aubio/blob/master/python/demos/demo_pyaudio.py
+
 
 
 """
@@ -31,6 +34,7 @@ import time
 from playsound import playsound
 import argparse
 import pyttsx3
+
 
 
 from pythonosc import osc_server
@@ -47,9 +51,11 @@ import numpy as num
 import pyaudio
 import wave
 
+
 mode = ''
 debug = False
 quit = False
+
 
 host_ip = "127.0.0.1"
 host_port_1 = 5005 # you are player 1 if you talk to this port
@@ -62,6 +68,12 @@ player_2_port = 5008
 player_ip = "127.0.0.1"
 player_port = 0
 host_port = 0
+
+started = False
+
+turn = 1
+
+
 
 if __name__ == '__main__' :
 
@@ -91,20 +103,27 @@ if __name__ == '__main__' :
 # functions receiving messages from host
 # TODO: add audio output so you know what's going on in the game
 
+
 def output(message): 
     engine.say(message)
     engine.runAndWait()
 
 def on_receive_game(address, *args):
+    global started 
     print("> game state: " + str(args[0]))
-    # 0: menu, 1: game starts
+    if int(args[0]) == 1:  
+        started = True
+        print("Game started")
+    else:
+        started = False
+        print("Game not started")
 
 def on_receive_ball(address, *args):
     # print("> ball position: (" + str(args[0]) + ", " + str(args[1]) + ")")
     pass
 
 def on_receive_paddle(address, *args):
-    # print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
+    #print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
     pass
 
 def on_receive_hitpaddle(address, *args):
@@ -114,6 +133,9 @@ def on_receive_hitpaddle(address, *args):
 
 def on_receive_ballout(address, *args):
     print("> ball went out on left/right side: " + str(args[0]) )
+    global turn
+    turn = 2 if turn == 1 else 1 
+    print(f"Player {turn} turn")
 
 def on_receive_ballbounce(address, *args):
     # example sound
@@ -166,10 +188,11 @@ dispatcher_player.map("/p2bigpaddle", on_receive_p2_bigpaddle)
 
 # example 1: speech recognition functions using google api
 # -------------------------------------#
+
 engine = pyttsx3.init()
 
 def listen_to_speech():
-    global quit
+    global quit, started
     while not quit:
         
         # obtain audio from the microphone
@@ -188,12 +211,16 @@ def listen_to_speech():
             if recog_results == "play" or recog_results == "start":
                 client.send_message('/g', 1)
                 client.send_message('/setgame', 1)
+                started = True 
                 output("Game starting")
-            
+    
         except sr.UnknownValueError:
             print("[speech recognition] Google Speech Recognition could not understand audio")
         except sr.RequestError as e:
             print("[speech recognition] Could not request results from Google Speech Recognition service; {0}".format(e))
+        
+     
+
 # -------------------------------------#
 
 # example 2: pitch & volume detection
@@ -212,27 +239,40 @@ pDetection.set_unit("Hz")
 pDetection.set_silence(-40)
 
 def sense_microphone():
-    global quit
-    global debug
+    global quit, debug, started
     while not quit:
-        data = stream.read(1024,exception_on_overflow=False)
-        samples = num.fromstring(data,
-            dtype=aubio.float_type)
+        if not started:
+            time.sleep(0.1)
+            continue
 
-        # Compute the pitch of the microphone input
+        data = stream.read(1024, exception_on_overflow=False)
+        samples = num.fromstring(data, dtype=aubio.float_type)
+    
+
         pitch = pDetection(samples)[0]
-        # Compute the energy (volume) of the mic input
-        volume = num.sum(samples**2)/len(samples)
-        # Format the volume output so that at most
-        # it has six decimal numbers.
+        volume = num.sum(samples**2) / len(samples)
         volume = "{:.6f}".format(volume)
 
-        # uncomment these lines if you want pitch or volume
+        if pitch > 0: 
+            move_on_pitch(pitch, turn)
+
         if debug:
-            print("pitch "+str(pitch)+" volume "+str(volume))
+            print(f"pitch: {pitch:.2f}, volume: {volume}")
+
+def move_on_pitch(pitch, player): 
+    # lin interp: num.interp(value, [input_min, input_max], [output_min, output_max])
+    paddle_pos = None
+    print("Player ", player, "position is ", pitch)
+    if pitch > 0: 
+        if 300 <= pitch <= 600:  
+                paddle_pos = int(num.interp(pitch, [300, 600], [450, 0]))
+
+
+    if paddle_pos: 
+        client.send_message('/setpaddle', paddle_pos)
+        print("***moving to: ", paddle_pos)
+
 # -------------------------------------#
-
-
 # speech recognition thread
 # -------------------------------------#
 # start a thread to listen to speech
@@ -251,7 +291,7 @@ microphone_thread.start()
 # Play some fun sounds?
 # -------------------------------------#
 def hit():
-    playsound('hit.wav', False)
+    playsound('sounds/click1.wav', False)
 
 hit()
 # -------------------------------------#
@@ -305,4 +345,4 @@ while True:
     # pause the game:
    # client.send_message('/g', 0)
     # big paddle if received power up:
-    #client.send_message('/b', 0) what does str(args[0) mean
+    #client.send_message('/b', 0)
