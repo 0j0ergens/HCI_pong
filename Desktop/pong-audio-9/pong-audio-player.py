@@ -51,6 +51,11 @@ import numpy as num
 import pyaudio
 import wave
 
+last_pitch_p1 = None
+last_pitch_p2 = None
+paddle_pos1 = 225  # Start in the middle of the board
+paddle_pos2 = 225
+
 
 mode = ''
 debug = False
@@ -123,7 +128,7 @@ def on_receive_ball(address, *args):
     pass
 
 def on_receive_paddle(address, *args):
-    #print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
+    # print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
     pass
 
 def on_receive_hitpaddle(address, *args):
@@ -239,7 +244,7 @@ pDetection.set_unit("Hz")
 pDetection.set_silence(-40)
 
 def sense_microphone():
-    global quit, debug, started
+    global quit, debug, started, turn
     while not quit:
         if not started:
             time.sleep(0.1)
@@ -247,30 +252,50 @@ def sense_microphone():
 
         data = stream.read(1024, exception_on_overflow=False)
         samples = num.fromstring(data, dtype=aubio.float_type)
-    
-
         pitch = pDetection(samples)[0]
-        volume = num.sum(samples**2) / len(samples)
-        volume = "{:.6f}".format(volume)
 
-        if pitch > 0: 
-            move_on_pitch(pitch, turn)
+        if pitch > 0:
+            print(f"[DEBUG] Detected pitch: {pitch}")
+            if turn == 1:
+                move_on_pitch(pitch, 1)
+            elif turn == 2:
+                move_on_pitch(pitch, 2)
 
         if debug:
-            print(f"pitch: {pitch:.2f}, volume: {volume}")
-
-def move_on_pitch(pitch, player): 
-    # lin interp: num.interp(value, [input_min, input_max], [output_min, output_max])
-    paddle_pos = None
-    print("Player ", player, "position is ", pitch)
-    if pitch > 0: 
-        if 300 <= pitch <= 600:  
-                paddle_pos = int(num.interp(pitch, [300, 600], [450, 0]))
+            print(f"[DEBUG] pitch: {pitch}, smoothed: {pitch}")
 
 
-    if paddle_pos: 
-        client.send_message('/setpaddle', paddle_pos)
-        print("***moving to: ", paddle_pos)
+def move_on_pitch(pitch, player):
+    global last_pitch_p1, last_pitch_p2, paddle_pos1, paddle_pos2
+
+    step_size = 30  
+    min_position = 0  
+    max_position = 450  
+
+    if player == 1:
+        if last_pitch_p1 is not None:
+            pitch_diff = pitch - last_pitch_p1  
+            if pitch_diff > 3: 
+                paddle_pos1 = max(min_position, paddle_pos1 - step_size)
+            elif pitch_diff < -5:  # Threshold to move down
+                paddle_pos1 = min(max_position, paddle_pos1 + step_size)
+            print(f"***Player 1 moving to: {paddle_pos1}")
+            client.send_message('/setpaddle', paddle_pos1)
+
+        last_pitch_p1 = pitch  
+
+    elif player == 2:
+        if last_pitch_p2 is not None:
+            pitch_diff = pitch - last_pitch_p2  # Calculate pitch difference
+            if pitch_diff > 5:  # Threshold to move up
+                paddle_pos2 = max(min_position, paddle_pos2 - step_size)
+            elif pitch_diff < -5:  # Threshold to move down
+                paddle_pos2 = min(max_position, paddle_pos2 + step_size)
+            print(f"***Player 2 moving to: {paddle_pos2}")
+            client.send_message('/setpaddle', paddle_pos2)
+
+        last_pitch_p2 = pitch  # Update last pitch for Player 2
+
 
 # -------------------------------------#
 # speech recognition thread
