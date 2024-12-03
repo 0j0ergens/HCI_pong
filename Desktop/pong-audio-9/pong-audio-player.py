@@ -37,6 +37,7 @@ import pyttsx3
 
 
 
+from pysinewave import SineWave
 from pythonosc import osc_server
 from pythonosc import dispatcher
 from pythonosc import udp_client
@@ -51,11 +52,28 @@ import numpy as num
 import pyaudio
 import wave
 
+#pitch output
+# -------------------------------------#
+# start a thread to determine + output pitch of ball movement
+audio_lock = threading.Lock()
+is_audio_playing = False
+prev_pitch = None
+
+# -------------------------------------#
+
+
+# Initialize sine wave globally
+sinewave = SineWave(pitch=0, pitch_per_second=5)
+
+
 last_pitch_p1 = None
 last_pitch_p2 = None
 paddle_pos1 = 225  # Start in the middle of the board
 paddle_pos2 = 225
 
+prev_pitch = None
+p1_in = False
+p2_in = False
 
 mode = ''
 debug = False
@@ -91,7 +109,10 @@ if __name__ == '__main__' :
     parser.add_argument('--debug', action='store_true', help='show debug info')
     args = parser.parse_args()
     print("> run as " + args.mode)
+  
     mode = args.mode
+   
+
     if (args.host_ip):
         host_ip = args.host_ip
     if (args.host_port):
@@ -108,8 +129,28 @@ if __name__ == '__main__' :
 # functions receiving messages from host
 # TODO: add audio output so you know what's going on in the game
 
+def output_pitch_thread(pitch_num):
+    """
+    Play the audio in a separate thread.
+    """
+    global is_audio_playing, sinewave
 
-def output(message): 
+    with audio_lock:
+        if is_audio_playing:
+            return
+        is_audio_playing = True
+
+    try:
+        print(f"Playing pitch: {pitch_num}")
+        sinewave.set_pitch(pitch_num)
+        sinewave.play()
+        time.sleep(.5)  # Adjust duration as needed for the sound
+        sinewave.stop()
+    finally:
+        with audio_lock:
+            is_audio_playing = False
+
+def output_message(message): 
     engine.say(message)
     engine.runAndWait()
 
@@ -124,8 +165,15 @@ def on_receive_game(address, *args):
         print("Game not started")
 
 def on_receive_ball(address, *args):
-    # print("> ball position: (" + str(args[0]) + ", " + str(args[1]) + ")")
-    pass
+    global prev_pitch
+    y_pos = float(args[1])
+    pitch = 12 - int(y_pos // 37.5)  # Map y_pos to a pitch
+
+    if pitch != prev_pitch:
+        prev_pitch = pitch
+        threading.Thread(target=output_pitch_thread, args=(pitch,)).start()  
+
+   # print("> ball position: (" + str(args[0]) + ", " + str(args[1]) +"pitch: " + pitch)
 
 def on_receive_paddle(address, *args):
     # print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
@@ -169,7 +217,23 @@ def on_receive_p2_bigpaddle(address, *args):
     # when p2 activates their big paddle
 
 def on_receive_hi(address, *args):
+    global p1_in, p2_in 
+    if mode == 'p1':
+        p1_in = True 
+    
+    if mode == 'p2':
+        p2_in == True 
+    
+    if not p1_in or not p2_in: 
+        p1_in = True 
+        p2_in = True 
+        if started == False: 
+            output_message("Both players joined. Say 'start' to begin the game.")
+            print("Game not started")
+        client.send_message("/hi", player_ip)
+
     print("> opponent says hi!")
+
 
 dispatcher_player = dispatcher.Dispatcher()
 dispatcher_player.map("/hi", on_receive_hi)
@@ -217,7 +281,7 @@ def listen_to_speech():
                 client.send_message('/g', 1)
                 client.send_message('/setgame', 1)
                 started = True 
-                output("Game starting")
+                output_message("Game starting")
     
         except sr.UnknownValueError:
             print("[speech recognition] Google Speech Recognition could not understand audio")
@@ -243,6 +307,10 @@ pDetection = aubio.pitch("default", 2048,
 pDetection.set_unit("Hz")
 pDetection.set_silence(-40)
 
+
+def y_to_audio(y_pos): 
+    return int(num.interp(y_pos, [0, 450], [220, 440]))
+
 def sense_microphone():
     global quit, debug, started, turn
     while not quit:
@@ -255,7 +323,6 @@ def sense_microphone():
         pitch = pDetection(samples)[0]
 
         if pitch > 0:
-            print(f"[DEBUG] Detected pitch: {pitch}")
             if turn == 1:
                 move_on_pitch(pitch, 1)
             elif turn == 2:
@@ -277,24 +344,22 @@ def move_on_pitch(pitch, player):
             pitch_diff = pitch - last_pitch_p1  
             if pitch_diff > 3: 
                 paddle_pos1 = max(min_position, paddle_pos1 - step_size)
-            elif pitch_diff < -5:  # Threshold to move down
+            elif pitch_diff < -5:  
                 paddle_pos1 = min(max_position, paddle_pos1 + step_size)
-            print(f"***Player 1 moving to: {paddle_pos1}")
             client.send_message('/setpaddle', paddle_pos1)
 
         last_pitch_p1 = pitch  
 
     elif player == 2:
         if last_pitch_p2 is not None:
-            pitch_diff = pitch - last_pitch_p2  # Calculate pitch difference
-            if pitch_diff > 5:  # Threshold to move up
+            pitch_diff = pitch - last_pitch_p2 
+            if pitch_diff > 5:  
                 paddle_pos2 = max(min_position, paddle_pos2 - step_size)
-            elif pitch_diff < -5:  # Threshold to move down
+            elif pitch_diff < -5: 
                 paddle_pos2 = min(max_position, paddle_pos2 + step_size)
-            print(f"***Player 2 moving to: {paddle_pos2}")
             client.send_message('/setpaddle', paddle_pos2)
 
-        last_pitch_p2 = pitch  # Update last pitch for Player 2
+        last_pitch_p2 = pitch  
 
 
 # -------------------------------------#
@@ -313,6 +378,7 @@ microphone_thread.daemon = True
 microphone_thread.start()
 # -------------------------------------#
 
+
 # Play some fun sounds?
 # -------------------------------------#
 def hit():
@@ -326,14 +392,17 @@ hit()
 # used to send messages to host
 if mode == 'p1':
     host_port = host_port_1
+    p1_in = True
+   # output_message("Player 1 has connected")
 if mode == 'p2':
     host_port = host_port_2
+    p2_in = True
+   # output_message("Player 2 has connected")
 
 if (mode == 'p1') or (mode == 'p2'):
     client = udp_client.SimpleUDPClient(host_ip, host_port)
     print("> connected to server at "+host_ip+":"+str(host_port))
-
-# OSC thread
+    
 # -------------------------------------#
 # Player OSC port
 if mode == 'p1':
@@ -347,6 +416,7 @@ player_server_thread.daemon = True
 player_server_thread.start()
 # -------------------------------------#
 client.send_message("/connect", player_ip)
+client.send_message("/hi", player_ip)
 
 # MAIN LOOP
 # manual input for debugging
@@ -371,3 +441,5 @@ while True:
    # client.send_message('/g', 0)
     # big paddle if received power up:
     #client.send_message('/b', 0)
+
+
