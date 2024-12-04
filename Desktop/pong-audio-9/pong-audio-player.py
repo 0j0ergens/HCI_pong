@@ -61,6 +61,8 @@ prev_pitch = None
 pitch_disabled = False 
 # -------------------------------------#
 
+voice_allowed = True 
+
 
 # Initialize sine wave globally
 sinewave = SineWave(pitch=0, pitch_per_second=5)
@@ -70,11 +72,12 @@ last_pitch_p1 = None
 last_pitch_p2 = None
 paddle_pos1 = 225  # Start in the middle of the board
 paddle_pos2 = 225
-
+stop_pitch = False
 prev_pitch = None
 p1_in = False
 p2_in = False
 prev_x = None 
+big_paddle = False
 
 mode = ''
 debug = False
@@ -131,9 +134,9 @@ if __name__ == '__main__' :
 # TODO: add audio output so you know what's going on in the game
 
 def output_pitch_thread(pitch_num):
-    global is_audio_playing, sinewave
+    global is_audio_playing, sinewave, stop_pitch
 
-    if pitch_num == None: 
+    if pitch_num == None or stop_pitch: 
         return 
 
     with audio_lock:
@@ -223,39 +226,55 @@ def on_receive_scores(address, *args):
 def on_receive_level(address, *args):
     print("> level now: " + str(args[0]))
 
+
+cur_powerup = None
 def on_receive_powerup(address, *args):
+    
+    global big_paddle, frozen, cur_powerup
+    cur_powerup = args[0]
     print("> powerup now: " + str(args[0]))
     pu = args[0]
     print(pu)
+    if cur_powerup == 0 and frozen: 
+        frozen = False
+        ps("sounds/unfrozen.mp3")
+
     if mode == 'p1': 
+        
         print("ACCESED")
         if pu == 1: 
-            print("frozen")
-            output_message("You are frozen.")
+            frozen = True
+            ps("sounds/frozen.mp3")
         if pu == 3: 
             print("bpaddle")
-            output_message("Say 'activate' to use big paddle")
+            big_paddle = True
+            ps("sounds/bp.mp3")
     
     if mode == 'p2': 
         print("2ACCESED")
         if pu == 2: 
-            output_message("You are frozen.")
+            frozen = True 
+            ps("sounds/frozen.mp3")
         if pu == 4: 
-            output_message("Say 'activate' to use big paddle")
+            ps("sounds/bp.mp3")
 
+    else: 
+        big_paddle = False
     # 1 - freeze p1
     # 2 - freeze p2
     # 3 - adds a big paddle to p1, not use
     # 4 - adds a big paddle to p2, not use
 
 def on_receive_p1_bigpaddle(address, *args):
-    output_message("paddle_actiated")
+    global big_paddle
     print("> p1 has a big paddle now")
+    ps("sounds/activated.mp3")
     # when p1 activates their big paddle
 
 def on_receive_p2_bigpaddle(address, *args):
+    global big_paddle
     print("> p2 has a big paddle now")
-    output_message("paddle activated.")
+    ps("sounds/activated.mp3")
     # when p2 activates their big paddle
 
 def on_receive_hi(address, *args):
@@ -270,9 +289,12 @@ def on_receive_hi(address, *args):
         p1_in = True 
         p2_in = True 
         if started == False: 
-            output_message("Both players joined. Say 'level' to change game level. Say 'instructions' to hear how to play. Otherwise, Say 'start' to begin the game.")
+            ps("sounds/Intro.mp3")
             print("Game not started")
         client.send_message("/hi", player_ip)
+    
+    if p1_in and p2_in: 
+        ps("sounds/hi.mp3")
 
     print("> opponent says hi!")
 
@@ -303,10 +325,9 @@ dispatcher_player.map("/p2bigpaddle", on_receive_p2_bigpaddle)
 engine = pyttsx3.init()
 
 def listen_to_speech():
-    global quit, started, pitch_disabled
+    global quit, started, pitch_disabled, cur_powerup, stop_pitch
     while not quit:
-        
-        # obtain audio from the microphone
+    
         r = sr.Recognizer()
         with sr.Microphone() as source:
             print("[speech recognition] Say something!")
@@ -318,10 +339,11 @@ def listen_to_speech():
             # instead of r.recognize_google(audio)
             recog_results = r.recognize_google(audio)
             print("[speech recognition] Google Speech Recognition thinks you said \"" + recog_results + "\"")
-            # if recognizing quit and exit then exit the program
+
             output_message("")
             if recog_results == "play" or recog_results == "start":
                 client.send_message('/g', 1)
+                stop_pitch = False 
                 client.send_message('/setgame', 1)
                 started = True 
                 pitch_disabled = False
@@ -330,28 +352,32 @@ def listen_to_speech():
          #       print("scores")
          #       client.send_message('/scores')
             if recog_results == "stop": 
+                stop_pitch = True
                 pitch_disabled = True
-                playsound('sounds/paused.mp3')
+                ps('sounds/paused.mp3')
                # output_message("Game paused.")
                 client.send_message('/setgame', 0)
             if recog_results == "activate":
-                if mode == 'p1':
-                    client.send_message('/p1bigpaddle')
-                    playsound("sounds/activated.mp3")
-                if mode == 'p2':
-                    client.send_message('/p2bigpaddle')
-                    playsound("sounds/activated.mp3")
+                if (mode == 'p1' and cur_powerup != 1) or (mode == 'p2' and cur_powerup != 2): 
+                    ps("sounds/notavailable.mp3")
+                client.send_message('/setbigpaddle', 0)  
             if recog_results == "level":
-                playsound("sounds/level.mp3")
+                ps("sounds/level.mp3")
             if recog_results == "hard":
-                playsound("sounds/hard.mp3")
-                client.send_message('/level', 2)
+                ps("sounds/hard.mp3")
+                client.send_message('/setlevel', 2)
             if recog_results == "insane":
-                playsound("sounds/insane.mp3")
-                client.send_message('/level', 3)
+                ps("sounds/insane.mp3")
+                client.send_message('/setlevel', 3)
             if recog_results == "easy":
-                playsound("sounds/easy.mp3")
-                client.send_message('/level', 1)
+                ps("sounds/easy.mp3")
+                client.send_message('/setlevel', 1)
+            if recog_results == "instruction" or recog_results == "instructions":
+                ps("sounds/instructions.mp3")
+                client.send_message('/setlevel', 1)
+            if recog_results == "hi": 
+                ps("sounds/hisent.mp3")
+                client.send_message('/hi')
                
                 
     
@@ -396,7 +422,11 @@ def y_to_audio(y_pos):
     return int(num.interp(y_pos, [0, 450], [220, 440]))
 
 def sense_microphone():
-    global quit, debug, started, turn
+    global quit, debug, started, turn, stop_pitch
+
+    if started or stop_pitch: 
+        return
+    
     while not quit:
         if not started:
             time.sleep(0.1)
@@ -418,8 +448,8 @@ def sense_microphone():
 def move_on_pitch(pitch, player):
     global last_pitch_p1, last_pitch_p2
     pitch = max(260, min(pitch, 523))
-    paddle_position = int((523 - pitch) / (523 - 260) * 450)
-  #  print(f"Pitch: {pitch}, Paddle Position: {paddle_position}")
+    buffer = 20
+    paddle_position = int((523 - pitch) / (523 - 260) * (450 - 2 * buffer)) + buffer
     client.send_message('/setpaddle', paddle_position)
 
 # -------------------------------------#
@@ -441,22 +471,30 @@ microphone_thread.start()
 
 # Play some fun sounds?
 # -------------------------------------#
+
+
+def ps(filepath):
+    global voice_allowed 
+
+    with audio_lock:  # Prevent overlapping audio
+        playsound(filepath, False)
+
 def hit(f):
     if f== 0: 
         print("hitsound")
-        playsound('sounds/click1.wav', False)
+        ps('sounds/click1.wav')
     
     elif f == 1:
         print("pingsound")
-        playsound('sounds/ping.wav', False)
+        ps('sounds/ping.wav')
     
     elif f == 2: 
         print("oobsound")
-        playsound('sounds/oob.wav', False)
+        ps('sounds/oob.wav')
     
     elif f == 3: 
         print("returnedsound")
-        playsound('sounds/return.wav', False)
+        ps('sounds/return.wav')
 
 hit(0) 
 # -------------------------------------#
