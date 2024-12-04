@@ -145,7 +145,7 @@ def output_pitch_thread(pitch_num):
         #print(f"Playing pitch: {pitch_num}")
         sinewave.set_pitch(pitch_num)
         sinewave.play()
-        time.sleep(.2)  # Adjust duration as needed for the sound
+        time.sleep(.2)  
     finally:
         with audio_lock:
             is_audio_playing = False
@@ -215,6 +215,9 @@ def on_receive_ballbounce(address, *args):
     print("> ball bounced on up/down side: " + str(args[0]) )
 
 def on_receive_scores(address, *args):
+  #  s1 = str(args[0])
+  #  s2 = str(args[2])
+   # output_message(s1 + " to " + s2)
     print("> scores now: " + str(args[0]) + " vs. " + str(args[1]))
 
 def on_receive_level(address, *args):
@@ -246,11 +249,13 @@ def on_receive_powerup(address, *args):
     # 4 - adds a big paddle to p2, not use
 
 def on_receive_p1_bigpaddle(address, *args):
+    output_message("paddle_actiated")
     print("> p1 has a big paddle now")
     # when p1 activates their big paddle
 
 def on_receive_p2_bigpaddle(address, *args):
     print("> p2 has a big paddle now")
+    output_message("paddle activated.")
     # when p2 activates their big paddle
 
 def on_receive_hi(address, *args):
@@ -265,7 +270,7 @@ def on_receive_hi(address, *args):
         p1_in = True 
         p2_in = True 
         if started == False: 
-            output_message("Both players joined. Say 'start' to begin the game.")
+            output_message("Both players joined. Say 'level' to change game level. Say 'instructions' to hear how to play. Otherwise, Say 'start' to begin the game.")
             print("Game not started")
         client.send_message("/hi", player_ip)
 
@@ -298,7 +303,7 @@ dispatcher_player.map("/p2bigpaddle", on_receive_p2_bigpaddle)
 engine = pyttsx3.init()
 
 def listen_to_speech():
-    global quit, started
+    global quit, started, pitch_disabled
     while not quit:
         
         # obtain audio from the microphone
@@ -314,14 +319,41 @@ def listen_to_speech():
             recog_results = r.recognize_google(audio)
             print("[speech recognition] Google Speech Recognition thinks you said \"" + recog_results + "\"")
             # if recognizing quit and exit then exit the program
+            output_message("")
             if recog_results == "play" or recog_results == "start":
                 client.send_message('/g', 1)
                 client.send_message('/setgame', 1)
                 started = True 
+                pitch_disabled = False
                 output_message("Game starting")
+          #  if recog_results == "score":
+         #       print("scores")
+         #       client.send_message('/scores')
             if recog_results == "stop": 
-                output_message("Game paused.")
+                pitch_disabled = True
+                playsound('sounds/paused.mp3')
+               # output_message("Game paused.")
                 client.send_message('/setgame', 0)
+            if recog_results == "activate":
+                if mode == 'p1':
+                    client.send_message('/p1bigpaddle')
+                    playsound("sounds/activated.mp3")
+                if mode == 'p2':
+                    client.send_message('/p2bigpaddle')
+                    playsound("sounds/activated.mp3")
+            if recog_results == "level":
+                playsound("sounds/level.mp3")
+            if recog_results == "hard":
+                playsound("sounds/hard.mp3")
+                client.send_message('/level', 2)
+            if recog_results == "insane":
+                playsound("sounds/insane.mp3")
+                client.send_message('/level', 3)
+            if recog_results == "easy":
+                playsound("sounds/easy.mp3")
+                client.send_message('/level', 1)
+               
+                
     
         except sr.UnknownValueError:
             print("[speech recognition] Google Speech Recognition could not understand audio")
@@ -347,6 +379,18 @@ pDetection = aubio.pitch("default", 2048,
 pDetection.set_unit("Hz")
 pDetection.set_silence(-40)
 
+tts_lock = threading.Lock()
+
+def output_message(message):
+    # Run the TTS engine in a dedicated thread
+    tts_thread = threading.Thread(target=_speak, args=(message,))
+    tts_thread.daemon = True
+    tts_thread.start()
+
+def _speak(message):
+    with tts_lock:
+        engine.say(message)
+        engine.runAndWait()
 
 def y_to_audio(y_pos): 
     return int(num.interp(y_pos, [0, 450], [220, 440]))
@@ -361,9 +405,6 @@ def sense_microphone():
         data = stream.read(1024, exception_on_overflow=False)
         samples = num.fromstring(data, dtype=aubio.float_type)
         pitch = pDetection(samples)[0]
-
-        print("PITCH:", pitch)
-
         if pitch > 0:
             if turn == 1:
                 move_on_pitch(pitch, 1)
@@ -375,34 +416,11 @@ def sense_microphone():
 
 
 def move_on_pitch(pitch, player):
-    global last_pitch_p1, last_pitch_p2, paddle_pos1, paddle_pos2
-
-    step_size = 30  
-    min_position = 0  
-    max_position = 450  
-
-    if player == 1:
-        if last_pitch_p1 is not None:
-            pitch_diff = pitch - last_pitch_p1  
-            if pitch_diff > 3: 
-                paddle_pos1 = max(min_position, paddle_pos1 - step_size)
-            elif pitch_diff < -5:  
-                paddle_pos1 = min(max_position, paddle_pos1 + step_size)
-            client.send_message('/setpaddle', paddle_pos1)
-
-        last_pitch_p1 = pitch  
-
-    elif player == 2:
-        if last_pitch_p2 is not None:
-            pitch_diff = pitch - last_pitch_p2 
-            if pitch_diff > 5:  
-                paddle_pos2 = max(min_position, paddle_pos2 - step_size)
-            elif pitch_diff < -5: 
-                paddle_pos2 = min(max_position, paddle_pos2 + step_size)
-            client.send_message('/setpaddle', paddle_pos2)
-
-        last_pitch_p2 = pitch  
-
+    global last_pitch_p1, last_pitch_p2
+    pitch = max(260, min(pitch, 523))
+    paddle_position = int((523 - pitch) / (523 - 260) * 450)
+  #  print(f"Pitch: {pitch}, Paddle Position: {paddle_position}")
+    client.send_message('/setpaddle', paddle_position)
 
 # -------------------------------------#
 # speech recognition thread
