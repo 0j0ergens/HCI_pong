@@ -58,7 +58,7 @@ import wave
 audio_lock = threading.Lock()
 is_audio_playing = False
 prev_pitch = None
-
+pitch_disabled = False 
 # -------------------------------------#
 
 
@@ -74,6 +74,7 @@ paddle_pos2 = 225
 prev_pitch = None
 p1_in = False
 p2_in = False
+prev_x = None 
 
 mode = ''
 debug = False
@@ -130,22 +131,21 @@ if __name__ == '__main__' :
 # TODO: add audio output so you know what's going on in the game
 
 def output_pitch_thread(pitch_num):
-    """
-    Play the audio in a separate thread.
-    """
     global is_audio_playing, sinewave
+
+    if pitch_num == None: 
+        return 
 
     with audio_lock:
         if is_audio_playing:
             return
         is_audio_playing = True
-
+    sinewave.set_volume(1)
     try:
-        print(f"Playing pitch: {pitch_num}")
+        #print(f"Playing pitch: {pitch_num}")
         sinewave.set_pitch(pitch_num)
         sinewave.play()
-        time.sleep(.5)  # Adjust duration as needed for the sound
-        sinewave.stop()
+        time.sleep(.2)  # Adjust duration as needed for the sound
     finally:
         with audio_lock:
             is_audio_playing = False
@@ -165,15 +165,29 @@ def on_receive_game(address, *args):
         print("Game not started")
 
 def on_receive_ball(address, *args):
-    global prev_pitch
-    y_pos = float(args[1])
-    pitch = 12 - int(y_pos // 37.5)  # Map y_pos to a pitch
+    global prev_pitch, pitch_disabled, prev_x 
 
-    if pitch != prev_pitch:
-        prev_pitch = pitch
-        threading.Thread(target=output_pitch_thread, args=(pitch,)).start()  
+    correct_direction = True 
+    x_pos = float(args[0])
+    if prev_x is not None:
+        if mode == 'p1':  
+            if x_pos > prev_x: 
+                correct_direction = False 
+        elif mode == 'p2': 
+            if x_pos < prev_x: 
+                correct_direction = False
+    prev_x = x_pos 
 
-   # print("> ball position: (" + str(args[0]) + ", " + str(args[1]) +"pitch: " + pitch)
+    y_pos = float(args[1]) 
+    pitch = 12 - int(y_pos // 37.5) 
+
+    if not pitch_disabled and correct_direction: 
+        if pitch != prev_pitch: 
+            prev_pitch = pitch
+            threading.Thread(target=output_pitch_thread, args=(pitch,)).start()
+    elif not correct_direction:  
+        with audio_lock:
+            sinewave.stop() 
 
 def on_receive_paddle(address, *args):
     # print("> paddle position: (" + str(args[0]) + ", " + str(args[1]) + ")")
@@ -181,18 +195,23 @@ def on_receive_paddle(address, *args):
 
 def on_receive_hitpaddle(address, *args):
     # example sound
-    hit()
+    hit(3)
     print("> ball hit at paddle " + str(args[0]) )
 
 def on_receive_ballout(address, *args):
     print("> ball went out on left/right side: " + str(args[0]) )
-    global turn
-    turn = 2 if turn == 1 else 1 
-    print(f"Player {turn} turn")
+    hit(2)
+    global pitch_disabled 
+    pitch_disabled = True 
+    time.sleep(.5)
+    pitch_disabled = False 
+
 
 def on_receive_ballbounce(address, *args):
+    global pitch_disabled
     # example sound
-    hit()
+    hit(1)
+   # pitch_disabled = False
     print("> ball bounced on up/down side: " + str(args[0]) )
 
 def on_receive_scores(address, *args):
@@ -203,6 +222,24 @@ def on_receive_level(address, *args):
 
 def on_receive_powerup(address, *args):
     print("> powerup now: " + str(args[0]))
+    pu = args[0]
+    print(pu)
+    if mode == 'p1': 
+        print("ACCESED")
+        if pu == 1: 
+            print("frozen")
+            output_message("You are frozen.")
+        if pu == 3: 
+            print("bpaddle")
+            output_message("Say 'activate' to use big paddle")
+    
+    if mode == 'p2': 
+        print("2ACCESED")
+        if pu == 2: 
+            output_message("You are frozen.")
+        if pu == 4: 
+            output_message("Say 'activate' to use big paddle")
+
     # 1 - freeze p1
     # 2 - freeze p2
     # 3 - adds a big paddle to p1, not use
@@ -282,6 +319,9 @@ def listen_to_speech():
                 client.send_message('/setgame', 1)
                 started = True 
                 output_message("Game starting")
+            if recog_results == "stop": 
+                output_message("Game paused.")
+                client.send_message('/setgame', 0)
     
         except sr.UnknownValueError:
             print("[speech recognition] Google Speech Recognition could not understand audio")
@@ -321,6 +361,8 @@ def sense_microphone():
         data = stream.read(1024, exception_on_overflow=False)
         samples = num.fromstring(data, dtype=aubio.float_type)
         pitch = pDetection(samples)[0]
+
+        print("PITCH:", pitch)
 
         if pitch > 0:
             if turn == 1:
@@ -381,10 +423,24 @@ microphone_thread.start()
 
 # Play some fun sounds?
 # -------------------------------------#
-def hit():
-    playsound('sounds/click1.wav', False)
+def hit(f):
+    if f== 0: 
+        print("hitsound")
+        playsound('sounds/click1.wav', False)
+    
+    elif f == 1:
+        print("pingsound")
+        playsound('sounds/ping.wav', False)
+    
+    elif f == 2: 
+        print("oobsound")
+        playsound('sounds/oob.wav', False)
+    
+    elif f == 3: 
+        print("returnedsound")
+        playsound('sounds/return.wav', False)
 
-hit()
+hit(0) 
 # -------------------------------------#
 
 # OSC connection
