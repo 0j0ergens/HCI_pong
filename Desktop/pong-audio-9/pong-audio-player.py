@@ -41,6 +41,7 @@ from pysinewave import SineWave
 from pythonosc import osc_server
 from pythonosc import dispatcher
 from pythonosc import udp_client
+import subprocess
 
 # threading so that listenting to speech would not block the whole program
 import threading
@@ -78,6 +79,7 @@ p1_in = False
 p2_in = False
 prev_x = None 
 big_paddle = False
+frozen = False
 
 mode = ''
 debug = False
@@ -204,6 +206,12 @@ def on_receive_hitpaddle(address, *args):
 def on_receive_ballout(address, *args):
     print("> ball went out on left/right side: " + str(args[0]) )
     hit(2)
+    side = args[0]
+    if (mode == 'p1' and side == 2) or (mode == 'p2' and side == 1): 
+        ps('sounds/win.wav')
+    if (mode == 'p1' and side == 1) or (mode == 'p2' and side == 2): 
+        ps('sounds/hit.wav')
+   
     global pitch_disabled 
     pitch_disabled = True 
     time.sleep(.5)
@@ -218,8 +226,11 @@ def on_receive_ballbounce(address, *args):
     print("> ball bounced on up/down side: " + str(args[0]) )
 
 def on_receive_scores(address, *args):
-  #  s1 = str(args[0])
-  #  s2 = str(args[2])
+    global s1, s2
+    s1 = str(args[0])
+    s2 = str(args[2])
+    score = f'say p1 {s1} to p2 {s2}'
+    subprocess.run(score, shell=True)
    # output_message(s1 + " to " + s2)
     print("> scores now: " + str(args[0]) + " vs. " + str(args[1]))
 
@@ -347,9 +358,10 @@ def listen_to_speech():
                 client.send_message('/setgame', 1)
                 started = True 
                 pitch_disabled = False
-                output_message("Game starting")
-          #  if recog_results == "score":
-         #       print("scores")
+                ps("sounds/started.mp3")
+            
+            if recog_results == "score":
+                subprocess.run("say test", shell=True)
          #       client.send_message('/scores')
             if recog_results == "stop": 
                 stop_pitch = True
@@ -358,8 +370,8 @@ def listen_to_speech():
                # output_message("Game paused.")
                 client.send_message('/setgame', 0)
             if recog_results == "activate":
-                if (mode == 'p1' and cur_powerup != 1) or (mode == 'p2' and cur_powerup != 2): 
-                    ps("sounds/notavailable.mp3")
+               # if (mode == 'p1' and cur_powerup != 1) or (mode == 'p2' and cur_powerup != 2): 
+              #      ps("sounds/notavailable.mp3")
                 client.send_message('/setbigpaddle', 0)  
             if recog_results == "level":
                 ps("sounds/level.mp3")
@@ -550,8 +562,4 @@ while True:
     # start the game:
   #  client.send_message('/g', 1)
     # pause the game:
-   # client.send_message('/g', 0)
-    # big paddle if received power up:
-    #client.send_message('/b', 0)
-
-
+   # client.sen
